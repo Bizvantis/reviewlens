@@ -1,0 +1,14 @@
+lightfm
+numpy
+pandas
+scipy
+scikit-learn
+streamlit
+google-generativeai
+python-dotenv
+requests
+tqdm
+matplotlib
+seaborn
+jupyter
+datasets

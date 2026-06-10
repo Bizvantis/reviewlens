@@ -4,11 +4,12 @@ pandas
 scipy
 scikit-learn
 streamlit
-google-generativeai
+google-genai
 python-dotenv
 requests
 tqdm
 matplotlib
 seaborn
 jupyter
-datasets
+datasets==2.19.1
+groq

@@ -1,10 +1,13 @@
 import os
 from dotenv import load_dotenv
 from groq import Groq
+from src.product_lookup import get_product_info
 
 load_dotenv()
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+from src.product_lookup import get_product_info
 
 def generate_explanation(counterfactual_result: dict, user_reviews: list = None) -> str:
     original_asin = counterfactual_result["original_asin"]
@@ -13,6 +16,10 @@ def generate_explanation(counterfactual_result: dict, user_reviews: list = None)
     steps = counterfactual_result["steps_taken"]
     original_score = counterfactual_result["original_score"]
     new_score = counterfactual_result["new_score"]
+
+    # Fetch real product names
+    orig_info = get_product_info(original_asin)
+    cf_info = get_product_info(cf_asin)
 
     review_context = ""
     if user_reviews:
@@ -24,24 +31,27 @@ The user has written these past reviews:
     prompt = f"""
 You are an AI system that explains product recommendations to Amazon customers in plain English.
 
-A recommendation system currently recommends product {original_asin} to this user (confidence score: {original_score}).
-The system found that a small shift in the user's preferences (magnitude: {magnitude}, found in {steps} steps)
-would cause the system to recommend {cf_asin} instead (new score: {new_score}).
+The user is currently being recommended: "{orig_info['title']}" (ASIN: {original_asin})
+This product has an average rating of {orig_info['avg_rating']} from {orig_info['rating_count']} reviews.
+
+Our system found that a very small shift in this user's preferences would instead recommend:
+"{cf_info['title']}" (ASIN: {cf_asin})
 {review_context}
 
 Write a clear, friendly 3-sentence explanation for the customer that:
-1. Tells them WHY they are being recommended {original_asin} right now
-2. Explains what small preference shift would lead to {cf_asin} being recommended instead
-3. Ends with an empowering insight about their own taste
+1. Tells them WHY they are being recommended "{orig_info['title']}" right now based on their review history
+2. Explains what small preference shift would lead to "{cf_info['title']}" being recommended instead
+3. Ends with an empowering insight about what this reveals about their musical taste
 
 Rules:
 - No jargon, no mention of embeddings, vectors, or scores
 - Speak directly to the customer as "you"
-- Keep it conversational and under 80 words
+- Reference the actual product names, not ASINs
+- Keep it conversational and under 100 words
 """
 
     response = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
+        model="llama3-8b-8192",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=200,
         temperature=0.7

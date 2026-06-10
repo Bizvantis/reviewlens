@@ -13,3 +13,5 @@ seaborn
 jupyter
 datasets==2.19.1
 groq
+beautifulsoup4
+requests

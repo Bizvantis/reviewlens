@@ -6,6 +6,7 @@ import sys
 import os
 import requests
 import pandas as pd
+import json
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -39,13 +40,6 @@ st.markdown("""
         font-family: monospace;
         font-size: 13px;
         font-weight: bold;
-    }
-    .metric-card {
-        background: #1a1f2e;
-        border: 1px solid #2d3561;
-        border-radius: 8px;
-        padding: 15px;
-        text-align: center;
     }
     .stability-high { color: #00d26a; }
     .stability-low { color: #ff4444; }
@@ -85,16 +79,10 @@ st.markdown("""
         font-size: 12px;
         margin: 3px;
     }
-    .flip-arrow {
-        font-size: 32px;
-        text-align: center;
-        color: #ff9900;
-        margin: 10px 0;
-    }
 </style>
 """, unsafe_allow_html=True)
 
-# --- Load artifacts ---
+# --- Cache Functions ---
 @st.cache_resource
 def load_all():
     model, idx2product, product2idx, matrix = load_model_and_artifacts()
@@ -105,22 +93,10 @@ def load_all():
         user2idx = pickle.load(f)
     return model, idx2product, product2idx, matrix, df, idx2user, user2idx
 
-@st.cache_data(ttl=3600)
-def fetch_product_info(asin: str) -> dict:
-    """Fetch real product title from Amazon via Open Library / fallback."""
-    try:
-        url = f"https://www.amazon.in/dp/{asin}"
-        headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get(url, headers=headers, timeout=5)
-        if r.status_code == 200:
-            from bs4 import BeautifulSoup
-            soup = BeautifulSoup(r.text, "html.parser")
-            title_tag = soup.find(id="productTitle")
-            if title_tag:
-                return {"title": title_tag.get_text().strip(), "asin": asin}
-    except:
-        pass
-    return {"title": f"Musical Instrument Product", "asin": asin}
+@st.cache_data
+def load_eval_metrics():
+    with open("data/eval_results.json", "r") as f:
+        return json.load(f)
 
 def stability_label(magnitude: float) -> tuple:
     if magnitude >= 0.05:
@@ -140,7 +116,7 @@ with col_title:
 
 st.markdown("---")
 
-# --- Load data ---
+# --- Load Data ---
 model, idx2product, product2idx, matrix, df, idx2user, user2idx = load_all()
 
 # --- Sidebar ---
@@ -171,15 +147,49 @@ with st.sidebar:
     3. **Detect** the flip point where recommendation changes
     4. **Explain** the insight in plain English via LLM
     """)
+
+    st.markdown("---")
+    st.markdown("### 📈 Dataset Insights")
+    eda_figures = {
+        "Rating Distribution": "notebooks/figures/01_rating_distribution.png",
+        "User Activity (Power Law)": "notebooks/figures/02_user_activity.png",
+        "Product Popularity": "notebooks/figures/03_product_popularity.png",
+        "Matrix Sparsity": "notebooks/figures/04_sparsity.png",
+        "Rating Trends Over Time": "notebooks/figures/05_rating_trends.png",
+    }
+    selected_fig = st.selectbox("View EDA Chart", list(eda_figures.keys()))
+    if os.path.exists(eda_figures[selected_fig]):
+        st.image(eda_figures[selected_fig], width=270)
+
     st.markdown("---")
     st.caption("Built on Amazon Reviews 2023 · Musical Instruments · ALS + Groq LLaMA3")
+
+# --- Evaluation Banner ---
+with st.expander("📊 Model Evaluation Against Baselines", expanded=False):
+    st.markdown("<div style='color:#888;font-size:14px;margin-bottom:15px'>For researchers and engineers — proof that the model learns genuine personalization signals, not just popularity or random patterns.</div>", unsafe_allow_html=True)
+    eval_metrics = load_eval_metrics()
+    col_e1, col_e2, col_e3 = st.columns(3)
+    with col_e1:
+        st.metric("Precision@10", eval_metrics["precision_at_10"],
+                  help="Fraction of top-10 recommendations that were relevant")
+    with col_e2:
+        st.metric("Recall@10", eval_metrics["recall_at_10"],
+                  help="Fraction of relevant items captured in top-10")
+    with col_e3:
+        st.metric("NDCG@10", eval_metrics["ndcg_at_10"],
+                  help="Ranking quality — relevant items ranked higher score better")
+    st.markdown(f"<div style='color:#888;font-size:12px;margin:8px 0'>Evaluated on {eval_metrics['users_evaluated']} users · {eval_metrics['n_products']:,} products · Both popularity and random baselines score 0.0000 — confirming genuine personalization</div>", unsafe_allow_html=True)
+    if os.path.exists("data/evaluation_chart.png"):
+        st.image("data/evaluation_chart.png")
+
+st.markdown("---")
 
 # --- User Profile ---
 user_id = idx2user[user_idx]
 user_reviews_df = df[df["user_id"] == user_id]["text"].dropna().tolist()
 user_ratings_df = df[df["user_id"] == user_id]["rating"].tolist()
 
-st.markdown(f"### 👤 User Profile")
+st.markdown("### 👤 User Profile")
 
 col1, col2, col3 = st.columns(3)
 with col1:
@@ -202,7 +212,10 @@ st.markdown("---")
 # --- Main Button ---
 if st.button("🔍 Generate Counterfactual Explanation", type="primary", use_container_width=True):
 
-    with st.spinner("Running counterfactual search across preference space..."):
+    progress = st.progress(0, text="Initializing...")
+
+    with st.spinner("Step 1/3 — Running counterfactual search..."):
+        progress.progress(33, text="Step 1/3 — Searching preference space...")
         result = generate_counterfactual(
             model, user_idx, idx2product,
             n_steps=1000,
@@ -210,6 +223,8 @@ if st.button("🔍 Generate Counterfactual Explanation", type="primary", use_con
         )
 
     if result:
+        progress.progress(66, text="Step 2/3 — Generating explanation...")
+
         st.markdown("---")
         st.markdown("## 📊 Analysis Results")
 
@@ -285,7 +300,6 @@ if st.button("🔍 Generate Counterfactual Explanation", type="primary", use_con
         </div>
         """, unsafe_allow_html=True)
 
-        # Stability bar
         bar_val = min(result["perturbation_magnitude"] / 0.1, 1.0)
         st.progress(bar_val, text=f"Preference stability: {int(bar_val * 100)}%")
 
@@ -293,10 +307,12 @@ if st.button("🔍 Generate Counterfactual Explanation", type="primary", use_con
 
         # --- LLM Explanation ---
         st.markdown("### 💬 What This Means For You")
-        with st.spinner("Generating personalized explanation..."):
-            explanation = generate_explanation(result, user_reviews_df)
-
-        st.markdown(f"<div class='insight-box'>{explanation}</div>", unsafe_allow_html=True)
+        with st.spinner("Step 2/3 — Generating personalized explanation..."):
+            try:
+                explanation = generate_explanation(result, user_reviews_df)
+                st.markdown(f"<div class='insight-box'>{explanation}</div>", unsafe_allow_html=True)
+            except Exception as e:
+                st.warning("Could not generate explanation right now. The recommendation analysis above is still valid.")
 
         st.markdown("---")
 
@@ -311,8 +327,11 @@ if st.button("🔍 Generate Counterfactual Explanation", type="primary", use_con
 
         st.info(insight)
 
+        progress.progress(100, text="✅ Analysis complete!")
         st.markdown("---")
-        st.caption("🔬 ReviewLens · ALS Collaborative Filtering · Counterfactual Explanation Engine · Groq LLaMA3 · Amazon Reviews 2023")
 
     else:
+        progress.progress(100, text="Done")
         st.warning("No counterfactual found for this user. Try adjusting precision or selecting a different user.")
+
+st.caption("🔬 ReviewLens · ALS Collaborative Filtering · Counterfactual Explanation Engine · Groq LLaMA3 · Amazon Reviews 2023")

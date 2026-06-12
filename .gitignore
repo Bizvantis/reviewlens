@@ -1,10 +1,34 @@
+# Python
 __pycache__/
 *.pyc
+*.pyo
 .env
-data/
-*.csv
-*.parquet
-*.pkl
-.dvc/
-.dvcignore
+.venv/
+*.egg-info/
 .ipynb_checkpoints/
+
+# Data — never commit large files
+data/
+*.parquet
+*.npz
+*.pkl
+*.csv
+
+# Model artifacts
+*.bin
+*.pt
+*.onnx
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Streamlit
+.streamlit/
+
+# DVC
+/tmp
